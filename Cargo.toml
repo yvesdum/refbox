@@ -1,0 +1,11 @@
+[package]
+name = "refbox"
+version = "0.1.0"
+edition = "2021"
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "create_mutate_drop"
+harness = false
