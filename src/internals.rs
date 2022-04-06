@@ -1,4 +1,4 @@
-//! The internal pointer.
+//! Contains the internal state machine and heap part of a `RefBox`.
 
 use core::cell::{Cell, UnsafeCell};
 use core::marker::PhantomData;
@@ -66,19 +66,39 @@ impl RefBoxHeapInner {
     ///
     /// # Panics
     ///
-    /// Panics if the number of weaks overflows `u32::MAX`.
+    /// Panics if the number of weaks overflows `RefCount::MAX`.
+    #[inline]
     pub(crate) fn increase_refcount(&self) {
-        let refcount = self.refcount().checked_add(1).unwrap();
-        self.refcount.set(refcount);
+        let refcount = self.refcount();
+
+        if refcount == RefCount::MAX {
+            cold_panic();
+        } else {
+            self.refcount.set(refcount + 1);
+        }
     }
 
     /// Increases the reference counter by 1.
-    /// 
-    /// Returns None if the refcount overflowed.
-    pub(crate) fn try_increase_refcount(&self) -> Option<()> {
-        let refcount = self.refcount().checked_add(1)?;
+    ///
+    /// Returns false if the refcount overflowed.
+    #[inline]
+    pub(crate) fn try_increase_refcount(&self) -> bool {
+        let refcount = self.refcount();
+
+        if refcount == RefCount::MAX {
+            cold_false()
+        } else {
+            self.refcount.set(refcount + 1);
+            true
+        }
+    }
+
+    /// Decreases the reference counter by 1.
+    #[inline]
+    fn decrease_refcount(&self) -> RefCount {
+        let refcount = self.refcount() - 1;
         self.refcount.set(refcount);
-        Some(())
+        refcount
     }
 
     /// Returns true if the owner is alive.
@@ -135,10 +155,29 @@ impl<T: ?Sized> RefBoxHeap<T> {
     ///
     /// 1. Ensure there are no references to `T`.
     /// 2. Ensure `T` is initialized.
+    /// 3. Ensure `T` is not already dropped.
     pub(crate) unsafe fn drop_data(&self) {
         ptr::drop_in_place(self.data.get());
         self.inner.status.set(Status::Dropped);
     }
+}
+
+/// Panics.
+///
+/// Is unlikely to be called, so it has 'cold' attribute for optimization.
+#[cold]
+#[inline(never)]
+fn cold_panic() {
+    panic!()
+}
+
+/// Returns false.
+///
+/// Is unlikely to be called, so it has 'cold' attribute for optimization.
+#[cold]
+#[inline(never)]
+fn cold_false() -> bool {
+    false
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -204,8 +243,7 @@ pub(crate) fn new_cyclic_refbox<T, F: FnOnce(&Ref<T>) -> T>(op: F) -> RefBox<T> 
     {
         std::mem::forget(rc_weak);
         let heap = unsafe { ptr.as_ref() };
-        let refcount = heap.inner.refcount();
-        heap.inner.refcount.set(refcount - 1);
+        heap.inner.decrease_refcount();
         heap.inner.status.set(Status::Available);
     }
 
@@ -275,15 +313,15 @@ pub(crate) unsafe fn drop_ref<T: ?Sized>(heap: NonNull<RefBoxHeap<T>>) {
     // of RefBoxHeap.
 
     // Decrease the reference count.
-    let refcount_ref = &(*heap.as_ptr()).inner.refcount;
-    let refcount = refcount_ref.get().saturating_sub(1);
-    refcount_ref.set(refcount);
-    drop(refcount_ref);
+    let refcount = (&(*heap.as_ptr()).inner).decrease_refcount();
 
-    // If there are no more references, the data needs to be deallocated.
-    if refcount == 0 && Status::Dropped == (*heap.as_ptr()).inner.status() {
-        // SAFETY: there are no more references to the heap part.
-        dealloc_heap(heap);
+    // If there are no more references and the owner is dropped,
+    // the data needs to be deallocated.
+    if refcount == 0 {
+        if (&(*heap.as_ptr()).inner).status() == Status::Dropped {
+            // SAFETY: there are no more references to the heap part.
+            dealloc_heap(heap);
+        }
     }
 }
 

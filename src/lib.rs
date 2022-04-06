@@ -19,7 +19,7 @@
 //! RefBox uses less memory, is faster to borrow from, and a Ref does not need
 //! to be upgraded to a RefBox in order to access the data. In fact, upgrading
 //! is not possible at all.
-//! 
+//!
 //! Note: this crate is currently **experimental** and requires Nightly Rust.
 //!
 //! [`Rc`]: std::rc::Rc
@@ -246,8 +246,11 @@ impl<T: ?Sized> RefBox<T> {
     /// * `Some(Ref)` if it was succesful.
     /// * `None` if the number of Refs overflowed `u32::MAX`.
     pub fn try_create_ref(&self) -> Option<Ref<T>> {
-        self.heap().try_increase_refcount()?;
-        Some(Ref { ptr: self.ptr })
+        if self.heap().try_increase_refcount() {
+            Some(Ref { ptr: self.ptr })
+        } else {
+            None
+        }
     }
 
     /// Returns the number of [`Ref`]s pointing to this RefBox.
@@ -404,8 +407,11 @@ impl<T: ?Sized> Ref<T> {
     /// * `Some(Ref)` if it was succesful.
     /// * `None` if the number of weaks overflowed `u32::MAX`.
     pub fn try_clone(&self) -> Option<Ref<T>> {
-        self.heap().try_increase_refcount()?;
-        Some(Ref { ptr: self.ptr })
+        if self.heap().try_increase_refcount() {
+            Some(Ref { ptr: self.ptr })
+        } else {
+            None
+        }
     }
 
     /// Returns the number of [`Ref`]s that point to the same data as this Ref.

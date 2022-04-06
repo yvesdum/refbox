@@ -7,5 +7,5 @@ edition = "2021"
 criterion = "0.3"
 
 [[bench]]
-name = "create_mutate_drop"
+name = "benches"
 harness = false
