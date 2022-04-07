@@ -308,6 +308,16 @@ impl<T: ?Sized> RefBox<T> {
         self.ptr.as_ref().data_mut()
     }
 
+    /// Returns a raw pointer to `T`.
+    pub fn as_ptr(&self) -> *const T {
+        let ptr = self.ptr.as_ptr();
+
+        // SAFETY (1): ptr is safe to dereference, see Self::heap().
+        // SAFETY (2): UnsafeCell is `#[repr(transparent)]`, which means
+        // a pointer to the cell is also a pointer to its only field.
+        unsafe { std::ptr::addr_of!((*ptr).data) as *const T }
+    }
+
     /// Turns the `RefBox` into a raw pointer.
     pub fn into_raw(self) -> *mut RefBoxHeap<T> {
         let ptr = self.ptr.as_ptr();
@@ -507,6 +517,17 @@ impl<T: ?Sized> Ref<T> {
     ///    of the returned reference.
     pub unsafe fn get_mut_unchecked(&mut self) -> &mut T {
         self.ptr.as_ref().data_mut()
+    }
+
+    /// Returns a raw pointer to `T`.
+    pub fn as_ptr(&self) -> *const T {
+        let ptr = self.ptr.as_ptr();
+
+        // SAFETY (1): ptr is safe to dereference, see Self::heap().
+        // SAFETY (2): UnsafeCell is `#[repr(transparent)]`, which means
+        // a pointer to the cell is also a pointer to its only field.
+        // SAFETY (3): data could be uninitialized, so use addr_of.
+        unsafe { std::ptr::addr_of!((*ptr).data) as *const T }
     }
 
     /// Turns the `Ref` into a raw pointer.
@@ -1006,5 +1027,33 @@ mod tests {
         drop(borrow2);
         drop(rc1);
         drop(rc2);
+    }
+
+    /// Test if `RefBox::as_ptr` returns the right pointer. Run with MIRI.
+    #[test]
+    fn refbox_as_ptr() {
+        let rc1 = RefBox::new(123456);
+        let ptr = rc1.as_ptr();
+
+        let heap = unsafe { rc1.ptr.as_ref() };
+        let real_ptr = heap.data.get();
+
+        assert_eq!(ptr, real_ptr);
+        drop(rc1);
+    }
+
+    /// Test if `Ref::as_ptr` returns the right pointer. Run with MIRI.
+    #[test]
+    fn ref_as_ptr() {
+        let rc1 = RefBox::new(123456);
+        let weak = rc1.create_ref();
+        let ptr = weak.as_ptr();
+
+        let heap = unsafe { weak.ptr.as_ref() };
+        let real_ptr = heap.data.get();
+
+        assert_eq!(ptr, real_ptr);
+        drop(weak);
+        drop(rc1);
     }
 }
