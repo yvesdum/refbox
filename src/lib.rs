@@ -152,6 +152,20 @@ impl<T: ?Sized> PartialEq<Ref<T>> for RefBox<T> {
     }
 }
 
+impl<T: Default> Default for RefBox<T> {
+    #[inline]
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
+impl<T> From<T> for RefBox<T> {
+    #[inline]
+    fn from(val: T) -> Self {
+        Self::new(val)
+    }
+}
+
 impl<T> RefBox<T> {
     /// Creates a new `RefBox` reference counted pointer.
     pub fn new(value: T) -> Self {
