@@ -528,7 +528,6 @@ impl<T: ?Sized> Ref<T> {
 /// A mutable borrow as a RAII-guard of a [`RefBox`] or [`Ref`].
 ///
 /// See the [module](crate) documentation for more information.
-#[derive(Debug)]
 pub struct Borrow<'rc, T: ?Sized> {
     pub(crate) heap: &'rc RefBoxHeap<T>,
     /// A borrow is a mutable reference to the data.
@@ -569,6 +568,12 @@ impl<'rc, T: ?Sized> DerefMut for Borrow<'rc, T> {
         // SAFETY: There can only ever be one `Borrow` to the same
         // data so we're sure there are no other references.
         unsafe { self.heap.data_mut() }
+    }
+}
+
+impl<'rc, T: ?Sized + fmt::Debug> fmt::Debug for Borrow<'rc, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Borrow").field(&self.deref()).finish()
     }
 }
 
