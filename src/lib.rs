@@ -1,10 +1,10 @@
 //! A smart pointer with many reference-counted weak references.
 //!
 //! A [`RefBox`] is a smart pointer that owns the data, just like a standard
-//! [`Box`]. Similarly, a RefBox cannot be cloned cheaply, and when it is 
+//! [`Box`]. Similarly, a RefBox cannot be cloned cheaply, and when it is
 //! dropped, the data it points to is dropped as well. However, a RefBox may
 //! have many [`Ref`] pointers to the same data. These pointers don't own the
-//! data and are reference counted, comparable to the standard library's 
+//! data and are reference counted, comparable to the standard library's
 //! [`Weak`]. Which means, as long as the RefBox is alive, Refs can be used to
 //! access the data from multiple places without lifetime parameters.
 //!
@@ -230,6 +230,21 @@ impl<T: ?Sized> RefBox<T> {
         }
     }
 
+    /// Provides access to the data through a closure.
+    ///
+    /// If the data is already borrowed, the closure is not executed and an
+    /// error is returned. Otherwise, the closure is executed and the output of
+    /// the closure is returned.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(R)` if the access was successful
+    /// * `Err(BorrowError::Borrowed)` if the data was already borrowed
+    pub fn try_access_mut<R, F: FnOnce(&mut T) -> R>(&self, op: F) -> Result<R, BorrowError> {
+        let mut borrow = self.try_borrow_mut()?;
+        Ok(op(&mut *borrow))
+    }
+
     /// Creates a weak reference to the data.
     ///
     /// # Panics
@@ -399,6 +414,22 @@ impl<T: ?Sized> Ref<T> {
             Status::Borrowed => Err(err_borrowed()),
             Status::Dropped | Status::DroppedWhileBorrowed => Err(err_dropped()),
         }
+    }
+
+    /// Provides access to the data through a closure.
+    ///
+    /// If the data is already borrowed or the owning [`RefBox`] is dropped,
+    /// the closure is not executed and an error is returned. Otherwise, the
+    /// closure is executed and the output of the closure is returned.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(R)` if the access was successful
+    /// * `Err(BorrowError::Borrowed)` if the data was already borrowed
+    /// * `Err(BorrowError::Dropped)` if the owning [`RefBox`] was dropped
+    pub fn try_access_mut<R, F: FnOnce(&mut T) -> R>(&self, op: F) -> Result<R, BorrowError> {
+        let mut borrow = self.try_borrow_mut()?;
+        Ok(op(&mut *borrow))
     }
 
     /// Tries to clone the weak reference to the data.
