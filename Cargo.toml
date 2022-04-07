@@ -2,7 +2,7 @@
 name = "refbox"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 readme = "README.md"
 description = "A smart pointer with a single owner and many weak references"
 keywords = ["smart", "pointer", "weak", "reference", "owner"]

@@ -68,3 +68,20 @@ The benchmarks are performed on an HP Intel Core i7-7700HQ CPU @ 2.80GHz, Window
 ![Benchmark: create and drop first reference, Rc is slightly faster.](./bench_results/20220406_create_and_drop_weak_reference.svg)
 
 ![Benchmark: clone and drop references, Rc is slightly faster.](./bench_results/20220406_clone_and_drop_weak_reference.svg)
+
+## License
+
+Licensed under either of
+
+ * Apache License, Version 2.0
+   ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+ * MIT license
+   ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
+
+## Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.
