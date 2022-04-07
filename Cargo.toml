@@ -2,6 +2,12 @@
 name = "refbox"
 version = "0.1.0"
 edition = "2021"
+licence = "MIT"
+readme = "README.md"
+description = "A smart pointer with a single owner and many weak references"
+keywords = ["smart", "pointer", "weak", "reference", "owner"]
+categories = ["memory-management", "rust-patterns"]
+repository = "https://github.com/yvesdum/refbox"
 
 [dev-dependencies]
 criterion = "0.3"

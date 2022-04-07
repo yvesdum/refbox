@@ -1,16 +1,16 @@
 //! A smart pointer with many reference-counted weak references.
 //!
-//! A [`RefBox`] is a smart pointer that owns the data, just like a [`Box`].
-//! Similarly, a RefBox cannot be cloned cheaply, and when it is dropped, the
-//! data it points to is dropped as well. However, a RefBox may have many
-//! [`Ref`] pointers to the same data. These pointers don't own the data and are
-//! reference counted, comparable to [`Weak`]. Which means, as long as the
-//! RefBox is alive, Refs can be used to access the data from multiple places
-//! without lifetime parameters.
+//! A [`RefBox`] is a smart pointer that owns the data, just like a standard
+//! [`Box`]. Similarly, a RefBox cannot be cloned cheaply, and when it is 
+//! dropped, the data it points to is dropped as well. However, a RefBox may
+//! have many [`Ref`] pointers to the same data. These pointers don't own the
+//! data and are reference counted, comparable to the standard library's 
+//! [`Weak`]. Which means, as long as the RefBox is alive, Refs can be used to
+//! access the data from multiple places without lifetime parameters.
 //!
 //! A RefBox could be seen as a lighter alternative to the standard library's
-//! [`Rc`], [`Weak`] and [`RefCell`] combination, which has more features but
-//! also a larger memory overhead.
+//! [`Rc`], [`Weak`] and [`RefCell`] combination, in cases where there is one
+//! Rc with many Weaks to the same data.
 //!
 //! A RefBox does not differentiate between strong and weak pointers and
 //! immutable and mutable borrows. There is always a *single* strong pointer,
@@ -39,6 +39,7 @@
 //! | `T::drop`        | When all `Rc`s are dropped                                     | When owner `RefBox` is dropped                  |
 //! | Max no. `Weak`s  | `usize::MAX`                                                   | `u32::MAX`                                      |
 //! | Heap overhead    | 64-bit: 24 bytes<br>32-bit: 12 bytes                           | 8 bytes                                         |
+//! | Performance      | Cloning is fast, mutating is slow                        | Cloning is a tiny bit slower, mutating is much faster |
 //!
 //! # Examples
 //!
