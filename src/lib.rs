@@ -1,4 +1,4 @@
-//! A smart pointer with many reference-counted weak references.
+//! A `Box` with weak references.
 //!
 //! A [`RefBox`] is a smart pointer that owns the data, just like a standard
 //! [`Box`]. Similarly, a RefBox cannot be cloned cheaply, and when it is
@@ -17,10 +17,9 @@
 //! zero, one or many weak pointers and all borrows are mutable. This means
 //! there can only be one borrow active at any given time. But in return,
 //! RefBox uses less memory, is faster to borrow from, and a Ref does not need
-//! to be upgraded to a RefBox in order to access the data. In fact, upgrading
-//! is not possible at all.
+//! to be upgraded to a RefBox in order to access the data.
 //!
-//! Note: this crate is currently **experimental** and requires Nightly Rust.
+//! Note: this crate is currently **experimental**.
 //!
 //! [`Rc`]: std::rc::Rc
 //! [`Weak`]: std::rc::Weak

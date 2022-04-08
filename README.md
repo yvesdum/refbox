@@ -1,14 +1,14 @@
 # RefBox
 
-A smart pointer with many reference-counted weak references.
+A `Box` with weak references.
 
 A `RefBox` is a smart pointer that owns the data, just like a standard `Box`. Similarly, a RefBox cannot be cloned cheaply, and when it is dropped, the data it points to is dropped as well. However, a RefBox may have many `Ref` pointers to the same data. These pointers don’t own the data and are reference counted, comparable to the standard library's `Weak`. Which means, as long as the RefBox is alive, Refs can be used to access the data from multiple places without lifetime parameters.
 
 A RefBox could be seen as a lighter alternative to the standard library’s `Rc`, `Weak` and `RefCell` combination in cases where there is one Rc with many Weaks to the same data.
 
-A RefBox does not differentiate between strong and weak pointers and immutable and mutable borrows. There is always a single strong pointer, zero, one or many weak pointers and all borrows are mutable. This means there can only be one borrow active at any given time. But in return, RefBox uses less memory, is faster to borrow from, and a Ref does not need to be upgraded to a RefBox in order to access the data. In fact, upgrading is not possible at all.
+A RefBox does not differentiate between strong and weak pointers and immutable and mutable borrows. There is always a single strong pointer, zero, one or many weak pointers and all borrows are mutable. This means there can only be one borrow active at any given time. But in return, RefBox uses less memory, is faster to borrow from, and a Ref does not need to be upgraded to a RefBox in order to access the data.
 
-Note: this crate is currently **experimental** and requires Nightly Rust.
+Note: this crate is currently **experimental**.
 
 ## Rc<RefCell<T>> vs RefBox<T>
 
