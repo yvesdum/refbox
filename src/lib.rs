@@ -58,11 +58,19 @@
 //!     assert_eq!(*borrow, 100);
 //! }
 //! ```
+//!
+//! # Optional Features
+//!
+//! * **cyclic**: Enables the `RefBox::new_cyclic()` method. This allows you to
+//!   create data structures that contain weak references to (parts of)
+//!   themselves in one go. Requires the Nightly feature [layout_for_ptr].
+//!
+//! [layout_for_ptr]: https://github.com/rust-lang/rust/issues/69835
 
 // The optional "cyclic" feature, which activates the `RefBox::<T>::new_cyclic()`
 // method, requires the Nightly feature "layout_for_ptr", as we need to be able
 // to get the layout of `T` through a raw pointer in order to deallocate it.
-#![feature(layout_for_ptr)]
+#![cfg_attr(feature = "cyclic", feature(layout_for_ptr))]
 
 mod internals;
 
@@ -178,6 +186,8 @@ impl<T> RefBox<T> {
     ///
     /// Note: if you try to borrow the data in the closure, you will get a
     /// [`BorrowError::Dropped`] error.
+    /// 
+    /// Note: only available if the `cyclic` optional feature is enabled.
     ///
     /// # Examples
     ///
@@ -201,6 +211,7 @@ impl<T> RefBox<T> {
     ///     }
     /// });
     /// ```
+    #[cfg(feature = "cyclic")]
     pub fn new_cyclic<F: FnOnce(&Ref<T>) -> T>(op: F) -> Self {
         internals::new_cyclic_refbox(op)
     }
@@ -498,7 +509,7 @@ impl<T: ?Sized> Ref<T> {
     ///
     /// 1. Ensure there are no mutable references to `T`.
     /// 2. Ensure `T` is fully initialized (don't use this in
-    ///    [`RefBox::new_cyclic`]).
+    ///    `RefBox::new_cyclic`).
     /// 3. Ensure the owning `RefBox` is alive for the entire lifetime
     ///    of the returned reference.
     pub unsafe fn get_unchecked(&self) -> &T {
@@ -512,7 +523,7 @@ impl<T: ?Sized> Ref<T> {
     ///
     /// 1. Ensure there are no other references to `T`.
     /// 2. Ensure `T` is fully initialized (don't use this in
-    ///    [`RefBox::new_cyclic`]).
+    ///    `RefBox::new_cyclic`).
     /// 3. Ensure the owning `RefBox` is alive for the entire lifetime
     ///    of the returned reference.
     pub unsafe fn get_mut_unchecked(&mut self) -> &mut T {
@@ -663,6 +674,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "cyclic")]
     fn rc_new_cyclic() {
         let rc = RefBox::new_cyclic(|_weak| 13579);
         assert_eq!(unsafe { *rc.get_unchecked() }, 13579);
@@ -672,6 +684,7 @@ mod tests {
     /// The refcount in the closure should be 1, and the refcount after
     /// creation should be 0.
     #[test]
+    #[cfg(feature = "cyclic")]
     fn rc_new_cyclic_refcount() {
         let rc = RefBox::new_cyclic(|weak| {
             assert_eq!(weak.refcount(), 1);
@@ -683,6 +696,7 @@ mod tests {
     /// The Ref in the closure should point to the same instance as the
     /// returned RefBox.
     #[test]
+    #[cfg(feature = "cyclic")]
     fn rc_new_cyclic_ptr_eq() {
         let mut out_weak = None;
         let rc = RefBox::new_cyclic(|weak| out_weak = Some(weak.clone()));
@@ -693,6 +707,7 @@ mod tests {
     /// MIRI: A panic in the closure of `new_cyclic` should not leak memory.
     #[test]
     #[should_panic]
+    #[cfg(feature = "cyclic")]
     fn rc_new_cyclic_does_not_leak() {
         let rc1 = RefBox::new_cyclic(|_weak| {
             panic!("panic in closure!");
@@ -977,6 +992,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "cyclic")]
     fn borrowing_in_cyclic_fails() {
         let rc = RefBox::new_cyclic(|weak| {
             let borrow = weak.try_borrow_mut_or_else(|| "was borrowed", || "was dropped");
@@ -986,6 +1002,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "cyclic")]
     fn cloning_weak_in_cyclic_increases_refcount() {
         let rc = RefBox::new_cyclic(|weak| {
             let weak2 = weak.clone();

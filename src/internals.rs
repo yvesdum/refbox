@@ -5,7 +5,7 @@ use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 use std::alloc;
 
-use crate::{Ref, RefBox};
+use crate::RefBox;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Heap Part Types
@@ -206,8 +206,9 @@ pub(crate) fn new_refbox<T>(value: T) -> RefBox<T> {
 
 /// Creates a new `RefBox` through a closure which receives a
 /// `RefBoxRef` to the same data.
+#[cfg(feature = "cyclic")]
 #[inline]
-pub(crate) fn new_cyclic_refbox<T, F: FnOnce(&Ref<T>) -> T>(op: F) -> RefBox<T> {
+pub(crate) fn new_cyclic_refbox<T, F: FnOnce(&crate::Ref<T>) -> T>(op: F) -> RefBox<T> {
     // Allocate the heap data with uninitialized T data.
     // SAFETY: `status` is set to `Dropped` to avoid being able to access
     // the unitialized data in the closure.
@@ -221,7 +222,7 @@ pub(crate) fn new_cyclic_refbox<T, F: FnOnce(&Ref<T>) -> T>(op: F) -> RefBox<T> 
 
     // SAFETY: `Box::into_raw` ensures the pointer is non-null.
     let ptr = unsafe { NonNull::new_unchecked(heap.cast()) };
-    let rc_weak = Ref { ptr };
+    let rc_weak = crate::Ref { ptr };
 
     // We get the real instance by executing the closure.
     // SAFETY (1): The weak reference is passed by reference to make sure the
@@ -260,15 +261,15 @@ pub(crate) fn new_cyclic_refbox<T, F: FnOnce(&Ref<T>) -> T>(op: F) -> RefBox<T> 
 /// Deallocates the heap part of the `RefBox`.
 unsafe fn dealloc_heap<T: ?Sized>(heap: NonNull<RefBoxHeap<T>>) {
     // In case of a panic in new_cyclic, `heap` contains partially
-    // uninitialized memory. Here we take a reference to the heap, but a
-    // reference to uninitialized memory is UB. We need Layout::for_value_raw,
-    // but that is unstable, or another solution.
-    // #[cfg(feature = "cyclic")]
-    // let layout = alloc::Layout::for_value_raw(heap.as_ptr());
-    // #[cfg(not(feature = "cyclic"))]
-    // let layout = alloc::Layout::for_value(heap.as_ref());
+    // uninitialized memory. It is UB to have a reference to uninitialized
+    // memory, so we need get the layout through a raw pointer. This
+    // requires Nighly feature 'layout_for_ptr'.
 
+    #[cfg(feature = "cyclic")]
     let layout = alloc::Layout::for_value_raw(heap.as_ptr());
+    #[cfg(not(feature = "cyclic"))]
+    let layout = alloc::Layout::for_value(heap.as_ref());
+
     alloc::dealloc(heap.as_ptr().cast(), layout);
 }
 

@@ -9,6 +9,9 @@ keywords = ["smart", "pointer", "weak", "reference", "owner"]
 categories = ["memory-management", "rust-patterns"]
 repository = "https://github.com/yvesdum/refbox"
 
+[features]
+cyclic = []
+
 [dev-dependencies]
 criterion = "0.3"
 
