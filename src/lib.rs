@@ -14,10 +14,10 @@
 //!
 //! A RefBox does not differentiate between strong and weak pointers and
 //! immutable and mutable borrows. There is always a *single* strong pointer,
-//! zero, one or many weak pointers and all borrows are mutable. This means
+//! zero, one or many weak pointers, and all borrows are mutable. This means
 //! there can only be one borrow active at any given time. But in return,
 //! RefBox uses less memory, is faster to borrow from, and a Ref does not need
-//! to be upgraded to a RefBox in order to access the data.
+//! to be upgraded to a RefBox to access the data.
 //!
 //! Note: this crate is currently **experimental**.
 //!
@@ -25,7 +25,7 @@
 //! [`Weak`]: std::rc::Weak
 //! [`RefCell`]: std::cell::RefCell
 //!
-//! # Rc<RefCell<T>> vs RefBox<T>
+//! # Rc<RefCell<T>> vs. RefBox<T>
 //!
 //! |                  | `Rc<RefCell<T>>`                                               | `RefBox<T>`                                     |
 //! |------------------|----------------------------------------------------------------|-------------------------------------------------|
@@ -68,7 +68,7 @@
 
 // The optional "cyclic" feature, which activates the `RefBox::<T>::new_cyclic()`
 // method, requires the Nightly feature "layout_for_ptr", as we need to be able
-// to get the layout of `T` through a raw pointer in order to deallocate it.
+// to get the layout of `T` through a raw pointer to deallocate it.
 #![cfg_attr(feature = "cyclic", feature(layout_for_ptr))]
 
 mod internals;
@@ -134,7 +134,7 @@ pub struct RefBox<T: ?Sized> {
 
 impl<T: ?Sized> Drop for RefBox<T> {
     fn drop(&mut self) {
-        unsafe { internals::drop_refbox(self.ptr) };
+        unsafe { internals::drop_ref_box(self.ptr) };
     }
 }
 
@@ -176,7 +176,7 @@ impl<T> From<T> for RefBox<T> {
 impl<T> RefBox<T> {
     /// Creates a new `RefBox` reference counted pointer.
     pub fn new(value: T) -> Self {
-        internals::new_refbox(value)
+        internals::new_ref_box(value)
     }
 
     /// Creates a new `RefBox` through a closure which receives a
@@ -212,7 +212,7 @@ impl<T> RefBox<T> {
     /// ```
     #[cfg(feature = "cyclic")]
     pub fn new_cyclic<F: FnOnce(&Ref<T>) -> T>(op: F) -> Self {
-        internals::new_cyclic_refbox(op)
+        internals::new_cyclic_ref_box(op)
     }
 }
 
@@ -224,7 +224,7 @@ impl<T: ?Sized> RefBox<T> {
         // as long as the RefBox is alive.
         // SAFETY (2): We only ever access this through a shared reference so
         // we don't have to account for possible mutable references.
-        // SAFETY (3): Because this is a RefBox we know the data field
+        // SAFETY (3): Because this is a `RefBox` we know the data field
         // is initialized.
         let ptr = self.ptr.as_ptr();
         unsafe { &(*ptr).inner }
@@ -237,16 +237,16 @@ impl<T: ?Sized> RefBox<T> {
     /// * `Ok(Borrow)` if the borrow was successful
     /// * `Err(BorrowError::Borrowed)` if the data was already borrowed
     #[inline]
-    pub fn try_borrow_mut<'b>(&'b self) -> Result<Borrow<'b, T>, BorrowError> {
+    pub fn try_borrow_mut(&self) -> Result<Borrow<T>, BorrowError> {
         self.try_borrow_mut_or_else(|| BorrowError::Borrowed)
     }
 
     /// Tries to borrow the data mutably and returns a custom error if
     /// borrowing fails.
-    pub fn try_borrow_mut_or_else<'b, E>(
-        &'b self,
+    pub fn try_borrow_mut_or_else<E>(
+        &self,
         err_borrowed: impl FnOnce() -> E,
-    ) -> Result<Borrow<'b, T>, E> {
+    ) -> Result<Borrow<T>, E> {
         match self.heap().status() {
             Status::Available => Ok(unsafe { Borrow::new(self.ptr.as_ref()) }),
             Status::Borrowed => Err(err_borrowed()),
@@ -283,7 +283,7 @@ impl<T: ?Sized> RefBox<T> {
     ///
     /// # Returns
     ///
-    /// * `Some(Ref)` if it was succesful.
+    /// * `Some(Ref)` if it was successful.
     /// * `None` if the number of Refs overflowed `u32::MAX`.
     pub fn try_create_ref(&self) -> Option<Ref<T>> {
         if self.heap().try_increase_refcount() {
@@ -305,7 +305,8 @@ impl<T: ?Sized> RefBox<T> {
     ///
     /// Ensure there are no mutable references to `T`.
     pub unsafe fn get_unchecked(&self) -> &T {
-        self.ptr.as_ref().data_ref()
+        // SAFETY: the caller must uphold the safety requirements
+        unsafe { self.ptr.as_ref().data_ref() }
     }
 
     /// Returns a mutable reference to the data without checking if
@@ -315,7 +316,8 @@ impl<T: ?Sized> RefBox<T> {
     ///
     /// Ensure there are no other references to `T`.
     pub unsafe fn get_mut_unchecked(&mut self) -> &mut T {
-        self.ptr.as_ref().data_mut()
+        // SAFETY: the caller must uphold the safety requirements
+        unsafe { self.ptr.as_ref().data_mut() }
     }
 
     /// Returns a raw pointer to `T`.
@@ -336,17 +338,28 @@ impl<T: ?Sized> RefBox<T> {
     }
 
     /// Creates a `RefBox` from a raw pointer.
+    ///
+    /// # Safety
+    ///
+    /// Ensure `ptr` is a valid pointer to a `RefBoxHeap<T>` instance.
     pub unsafe fn from_raw(ptr: *mut RefBoxHeap<T>) -> Self {
+        // SAFETY: the caller must uphold the safety requirements
         Self {
-            ptr: NonNull::new_unchecked(ptr),
+            ptr: unsafe { NonNull::new_unchecked(ptr) },
             _p: PhantomData,
         }
     }
 
     /// Casts a `RefBox<T>` to a `RefBox<U>`.
+    ///
+    /// # Safety
+    ///
+    /// Ensure `T` can be safely cast to `U`.
     pub unsafe fn cast<U>(self) -> RefBox<U> {
         let raw_ptr = self.into_raw();
-        RefBox::from_raw(raw_ptr as _)
+
+        // SAFETY: the caller must uphold the safety requirements
+        unsafe { RefBox::from_raw(raw_ptr as _) }
     }
 
     /// Returns the current status of the heap part for testing purposes.
@@ -398,7 +411,7 @@ impl<T: ?Sized> PartialEq for Ref<T> {
     /// This compares the pointers, not the actual object itself, which
     /// means it is very fast.
     fn eq(&self, other: &Self) -> bool {
-        self.ptr.as_ptr() == other.ptr.as_ptr()
+        std::ptr::addr_eq(self.ptr.as_ptr(), other.ptr.as_ptr())
     }
 }
 
@@ -432,17 +445,17 @@ impl<T: ?Sized> Ref<T> {
     /// * `Err(BorrowError::Borrowed)` if the data was already borrowed
     /// * `Err(BorrowError::Dropped)` if the owning [`RefBox`] was dropped
     #[inline]
-    pub fn try_borrow_mut<'rc>(&'rc self) -> Result<Borrow<'rc, T>, BorrowError> {
+    pub fn try_borrow_mut(&self) -> Result<Borrow<T>, BorrowError> {
         self.try_borrow_mut_or_else(|| BorrowError::Borrowed, || BorrowError::Dropped)
     }
 
     /// Tries to borrow the data mutably and returns a custom error if
     /// borrowing fails.
-    pub fn try_borrow_mut_or_else<'rc, E>(
-        &'rc self,
+    pub fn try_borrow_mut_or_else<E>(
+        &self,
         err_borrowed: impl FnOnce() -> E,
         err_dropped: impl FnOnce() -> E,
-    ) -> Result<Borrow<'rc, T>, E> {
+    ) -> Result<Borrow<T>, E> {
         match self.heap().status() {
             Status::Available => Ok(unsafe { Borrow::new(self.ptr.as_ref()) }),
             Status::Borrowed => Err(err_borrowed()),
@@ -470,7 +483,7 @@ impl<T: ?Sized> Ref<T> {
     ///
     /// # Returns
     ///
-    /// * `Some(Ref)` if it was succesful.
+    /// * `Some(Ref)` if it was successful.
     /// * `None` if the number of weaks overflowed `u32::MAX`.
     pub fn try_clone(&self) -> Option<Ref<T>> {
         if self.heap().try_increase_refcount() {
@@ -498,7 +511,7 @@ impl<T: ?Sized> Ref<T> {
     /// Returns true if this `Ref` and the supplied [`RefBox`]
     /// point to the same instance.
     pub fn is(&self, owner: &RefBox<T>) -> bool {
-        self.ptr.as_ptr() == owner.ptr.as_ptr()
+        std::ptr::addr_eq(self.ptr.as_ptr(), owner.ptr.as_ptr())
     }
 
     /// Returns an immutable reference to the data without checking if
@@ -512,7 +525,8 @@ impl<T: ?Sized> Ref<T> {
     /// 3. Ensure the owning `RefBox` is alive for the entire lifetime
     ///    of the returned reference.
     pub unsafe fn get_unchecked(&self) -> &T {
-        self.ptr.as_ref().data_ref()
+        // SAFETY: the caller must uphold the safety requirements
+        unsafe { self.ptr.as_ref().data_ref() }
     }
 
     /// Returns a mutable reference to the data without checking if
@@ -526,7 +540,8 @@ impl<T: ?Sized> Ref<T> {
     /// 3. Ensure the owning `RefBox` is alive for the entire lifetime
     ///    of the returned reference.
     pub unsafe fn get_mut_unchecked(&mut self) -> &mut T {
-        self.ptr.as_ref().data_mut()
+        // SAFETY: the caller must uphold the safety requirements
+        unsafe { self.ptr.as_ref().data_mut() }
     }
 
     /// Returns a raw pointer to `T`.
@@ -548,20 +563,31 @@ impl<T: ?Sized> Ref<T> {
     }
 
     /// Creates a `Ref` from a raw pointer.
+    ///
+    /// # Safety
+    ///
+    /// Ensure `ptr` is a valid pointer to a `RefBoxHeap<T>`.
     pub unsafe fn from_raw(ptr: *mut RefBoxHeap<T>) -> Self {
-        let ptr = NonNull::new_unchecked(ptr);
+        // SAFETY: the caller must uphold the safety requirements
+        let ptr = unsafe { NonNull::new_unchecked(ptr) };
         Self { ptr }
     }
 
     /// Casts a `Ref<T>` to a `Ref<U>`.
+    ///
+    /// # Safety
+    ///
+    /// Ensure `T` can be safely cast to `U`.
     pub unsafe fn cast<U>(self) -> Ref<U> {
         let raw_ptr = self.into_raw();
-        Ref::from_raw(raw_ptr as _)
+
+        // SAFETY: the caller must uphold the safety requirements
+        unsafe { Ref::from_raw(raw_ptr as _) }
     }
 
     /// Returns the current status of the heap part for testing purposes.
     #[cfg(test)]
-    fn status(&self) -> internals::Status {
+    fn status(&self) -> Status {
         self.heap().status()
     }
 }
@@ -603,7 +629,7 @@ impl<'rc, T: ?Sized> Deref for Borrow<'rc, T> {
 
     fn deref(&self) -> &Self::Target {
         // SAFETY: There can only ever be one `Borrow` to the same
-        // data so we're sure there are no mutable references.
+        // data, so we're sure there are no mutable references.
         unsafe { self.heap.data_ref() }
     }
 }
@@ -611,7 +637,7 @@ impl<'rc, T: ?Sized> Deref for Borrow<'rc, T> {
 impl<'rc, T: ?Sized> DerefMut for Borrow<'rc, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // SAFETY: There can only ever be one `Borrow` to the same
-        // data so we're sure there are no other references.
+        //  data, so we're sure there are no other references.
         unsafe { self.heap.data_mut() }
     }
 }
@@ -1021,7 +1047,6 @@ mod tests {
         let weak = RefBox::create_ref(&rc);
         assert_eq!(rc.refcount(), 1);
         *mut_ref = 13579;
-        drop(mut_ref);
         drop(borrow);
         drop(weak);
         drop(rc);
