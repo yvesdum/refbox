@@ -37,7 +37,7 @@
 //! | Active borrows   | One mutable or many immutable                                  | One (mutable or immutable)                      |
 //! | `T::drop`        | When all `Rc`s are dropped                                     | When owner `RefBox` is dropped                  |
 //! | Max no. `Weak`s  | `usize::MAX`                                                   | `u32::MAX`                                      |
-//! | Heap overhead    | 64-bit: 24 bytes<br>32-bit: 12 bytes                           | 8 bytes                                         |
+//! | Heap overhead    | 64-bit: 24 bytes<br>32-bit: 12 bytes | 8 bytes<br>With cyclic_stable enabled 64-bit: 24 bytes<br>With cyclic_stable enabled 32-bit: 12 bytes |
 //! | Performance      | Cloning is fast, mutating is slow                        | Cloning is a tiny bit slower, mutating is much faster |
 //!
 //! # Examples
@@ -60,9 +60,14 @@
 //!
 //! # Optional Features
 //!
-//! * **cyclic**: Enables the `RefBox::new_cyclic()` method. This allows you to
-//!   create data structures that contain weak references to (parts of)
-//!   themselves in one go. Requires the Nightly feature [layout_for_ptr].
+//! * **cyclic_stable**: Enables the `RefBox::new_cyclic()` method on the stable release channel
+//!   of Rust. This allows you to create data structures that contain weak references to (parts of)
+//!   themselves in one go. To make it work, the memory layout of the type `T` is saved in the heap
+//!   part of the `RefBox`. This increases the memory size of the heap part with `2 * usize`.
+//! * **cyclic**: Enables the `RefBox::new_cyclic()` method on the nightly release channel without
+//!   increasing the memory size of the heap part. This allows you to create data structures that
+//!   contain weak references to (parts of) themselves in one go. Requires the nightly feature
+//!   [layout_for_ptr].
 //!
 //! [layout_for_ptr]: https://github.com/rust-lang/rust/issues/69835
 
@@ -185,7 +190,7 @@ impl<T> RefBox<T> {
     ///
     /// Note: if you try to borrow the data in the closure, you will get a
     /// [`BorrowError::Dropped`] error.
-    /// 
+    ///
     /// Note: only available if the `cyclic` optional feature is enabled.
     ///
     /// # Examples
@@ -210,7 +215,7 @@ impl<T> RefBox<T> {
     ///     }
     /// });
     /// ```
-    #[cfg(feature = "cyclic")]
+    #[cfg(any(feature = "cyclic", feature = "cyclic_stable"))]
     pub fn new_cyclic<F: FnOnce(&Ref<T>) -> T>(op: F) -> Self {
         internals::new_cyclic_ref_box(op)
     }
@@ -680,8 +685,8 @@ mod tests {
     use std::panic;
     use std::rc::Rc;
 
-    use crate::internals::Status;
     use crate::RefBox;
+    use crate::internals::{RefBoxHeap, Status};
 
     #[test]
     fn rc_new() {
@@ -699,7 +704,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "cyclic")]
+    #[cfg(any(feature = "cyclic", feature = "cyclic_stable"))]
     fn rc_new_cyclic() {
         let rc = RefBox::new_cyclic(|_weak| 13579);
         assert_eq!(unsafe { *rc.get_unchecked() }, 13579);
@@ -709,7 +714,7 @@ mod tests {
     /// The refcount in the closure should be 1, and the refcount after
     /// creation should be 0.
     #[test]
-    #[cfg(feature = "cyclic")]
+    #[cfg(any(feature = "cyclic", feature = "cyclic_stable"))]
     fn rc_new_cyclic_refcount() {
         let rc = RefBox::new_cyclic(|weak| {
             assert_eq!(weak.refcount(), 1);
@@ -721,7 +726,7 @@ mod tests {
     /// The Ref in the closure should point to the same instance as the
     /// returned RefBox.
     #[test]
-    #[cfg(feature = "cyclic")]
+    #[cfg(any(feature = "cyclic", feature = "cyclic_stable"))]
     fn rc_new_cyclic_ptr_eq() {
         let mut out_weak = None;
         let rc = RefBox::new_cyclic(|weak| out_weak = Some(weak.clone()));
@@ -732,7 +737,7 @@ mod tests {
     /// MIRI: A panic in the closure of `new_cyclic` should not leak memory.
     #[test]
     #[should_panic]
-    #[cfg(feature = "cyclic")]
+    #[cfg(any(feature = "cyclic", feature = "cyclic_stable"))]
     fn rc_new_cyclic_does_not_leak() {
         let rc1 = RefBox::new_cyclic(|_weak| {
             panic!("panic in closure!");
@@ -1017,7 +1022,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "cyclic")]
+    #[cfg(any(feature = "cyclic", feature = "cyclic_stable"))]
     fn borrowing_in_cyclic_fails() {
         let rc = RefBox::new_cyclic(|weak| {
             let borrow = weak.try_borrow_mut_or_else(|| "was borrowed", || "was dropped");
@@ -1027,7 +1032,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "cyclic")]
+    #[cfg(any(feature = "cyclic", feature = "cyclic_stable"))]
     fn cloning_weak_in_cyclic_increases_refcount() {
         let rc = RefBox::new_cyclic(|weak| {
             let weak2 = weak.clone();
@@ -1096,5 +1101,43 @@ mod tests {
         assert_eq!(ptr, real_ptr);
         drop(weak);
         drop(rc1);
+    }
+
+    /// Test if the overhead of the heap part is 8 bytes when 'cyclic_stable' feature is not enabled.
+    #[test]
+    #[cfg(not(feature = "cyclic_stable"))]
+    fn heap_overhead() {
+        let layout = std::alloc::Layout::new::<RefBoxHeap<()>>();
+        assert_eq!(layout.size(), 8);
+    }
+
+    /// Test if the overhead of the heap part is 12 bytes when 'cyclic_stable' feature is enabled
+    /// and the pointer size is 16 bits.
+    #[test]
+    #[cfg(feature = "cyclic_stable")]
+    #[cfg(any(target_pointer_width = "16"))]
+    fn heap_overhead_cyclic_stable_16bit() {
+        let layout = std::alloc::Layout::new::<RefBoxHeap<()>>();
+        assert_eq!(layout.size(), 12);
+    }
+
+    /// Test if the overhead of the heap part is 16 bytes when 'cyclic_stable' feature is enabled
+    /// and the pointer size is 32 bits.
+    #[test]
+    #[cfg(feature = "cyclic_stable")]
+    #[cfg(any(target_pointer_width = "32"))]
+    fn heap_overhead_cyclic_stable_32bit() {
+        let layout = std::alloc::Layout::new::<RefBoxHeap<()>>();
+        assert_eq!(layout.size(), 16);
+    }
+
+    /// Test if the overhead of the heap part is 24 bytes when 'cyclic_stable' feature is enabled
+    /// and the pointer size is 64 bits.
+    #[test]
+    #[cfg(feature = "cyclic_stable")]
+    #[cfg(any(target_pointer_width = "64"))]
+    fn heap_overhead_cyclic_stable_64bit() {
+        let layout = std::alloc::Layout::new::<RefBoxHeap<()>>();
+        assert_eq!(layout.size(), 24);
     }
 }

@@ -11,6 +11,7 @@ repository = "https://github.com/yvesdum/refbox"
 
 [features]
 cyclic = []
+cyclic_stable = []
 
 [dev-dependencies]
 criterion = "0.3"

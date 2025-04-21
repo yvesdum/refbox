@@ -1,11 +1,13 @@
 //! Contains the internal state machine and heap part of a `RefBox`.
 
+use crate::RefBox;
 use core::cell::{Cell, UnsafeCell};
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 use std::alloc;
 
-use crate::RefBox;
+#[cfg(feature = "cyclic_stable")]
+use std::alloc::Layout;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Heap Part Types
@@ -31,6 +33,11 @@ pub(crate) struct RefBoxHeapInner {
     status: Cell<Status>,
     /// The number of weak references to the data.
     refcount: Cell<RefCount>,
+    /// The layout of the `RefBoxHeap<T>`.
+    ///
+    /// Necessary to deallocate the memory of the heap part when feature `cyclic_stable` is enabled.
+    #[cfg(feature = "cyclic_stable")]
+    layout: Layout,
 }
 
 /// The part of a `RefBox` that is stored on the heap.
@@ -53,6 +60,15 @@ impl RefBoxHeapInner {
     #[inline]
     pub(crate) fn refcount(&self) -> RefCount {
         self.refcount.get()
+    }
+
+    /// The layout of the entire `RefBoxHeap<T>`.
+    ///
+    /// Necessary to deallocate the memory of the heap part when feature `cyclic_stable` is enabled.
+    #[cfg(feature = "cyclic_stable")]
+    #[inline]
+    fn layout(&self) -> Layout {
+        self.layout
     }
 
     /// Sets the weak reference count. Used in tests.
@@ -193,6 +209,8 @@ pub(crate) fn new_ref_box<T>(value: T) -> RefBox<T> {
         inner: RefBoxHeapInner {
             status: Cell::new(Status::Available),
             refcount: Cell::new(0),
+            #[cfg(feature = "cyclic_stable")]
+            layout: Layout::new::<RefBoxHeap<T>>(),
         },
         data: UnsafeCell::new(value),
     }));
@@ -208,7 +226,7 @@ pub(crate) fn new_ref_box<T>(value: T) -> RefBox<T> {
 
 /// Creates a new `RefBox` through a closure which receives a
 /// `RefBoxRef` to the same data.
-#[cfg(feature = "cyclic")]
+#[cfg(any(feature = "cyclic", feature = "cyclic_stable"))]
 #[inline]
 pub(crate) fn new_cyclic_ref_box<T, F: FnOnce(&crate::Ref<T>) -> T>(op: F) -> RefBox<T> {
     // Allocate the heap data with uninitialized T data.
@@ -218,6 +236,8 @@ pub(crate) fn new_cyclic_ref_box<T, F: FnOnce(&crate::Ref<T>) -> T>(op: F) -> Re
         inner: RefBoxHeapInner {
             status: Cell::new(Status::Dropped),
             refcount: Cell::new(1),
+            #[cfg(feature = "cyclic_stable")]
+            layout: Layout::new::<RefBoxHeap<T>>(),
         },
         data: UnsafeCell::new(core::mem::MaybeUninit::<T>::uninit()),
     }));
@@ -262,17 +282,24 @@ pub(crate) fn new_cyclic_ref_box<T, F: FnOnce(&crate::Ref<T>) -> T>(op: F) -> Re
 
 /// Deallocates the heap part of the `RefBox`.
 unsafe fn dealloc_heap<T: ?Sized>(heap: NonNull<RefBoxHeap<T>>) {
+    // When both `cyclic` and `cyclic_stable` are enabled, this version
+    // is preferred to be extra sure about the safety.
+    #[cfg(feature = "cyclic_stable")]
+    let layout = unsafe { &(*heap.as_ptr()).inner }.layout();
+
     // In case of a panic in new_cyclic, `heap` contains partially
     // uninitialized memory. It is UB to have a reference to uninitialized
     // memory, so we need to get the layout through a raw pointer. This
     // requires Nightly feature 'layout_for_ptr'.
+    #[cfg(all(feature = "cyclic", not(feature = "cyclic_stable")))]
+    let layout = unsafe { alloc::Layout::for_value_raw(heap.as_ptr()) };
 
-    #[cfg(feature = "cyclic")]
-    let layout = alloc::Layout::for_value_raw(heap.as_ptr());
-    #[cfg(not(feature = "cyclic"))]
+    #[cfg(all(not(feature = "cyclic"), not(feature = "cyclic_stable")))]
     let layout = alloc::Layout::for_value(unsafe { heap.as_ref() });
 
-    unsafe { alloc::dealloc(heap.as_ptr().cast(), layout); }
+    unsafe {
+        alloc::dealloc(heap.as_ptr().cast(), layout);
+    }
 }
 
 /// Called when the owning RefBox is dropped.
@@ -300,7 +327,10 @@ pub(crate) unsafe fn drop_ref_box<T: ?Sized>(heap: NonNull<RefBoxHeap<T>>) {
             // It is possible to drop the owner of the data while
             // a borrow is active. In that case, dropping of the data is
             // delayed until the borrow is dropped.
-            unsafe { heap.as_ref() }.inner.status.set(Status::DroppedWhileBorrowed);
+            unsafe { heap.as_ref() }
+                .inner
+                .status
+                .set(Status::DroppedWhileBorrowed);
         }
         Status::DroppedWhileBorrowed | Status::Dropped => {
             // SAFETY: if the status is `DroppedWhileBorrowed` or `Dropped` it means
