@@ -243,8 +243,9 @@ pub(crate) fn new_cyclic_ref_box<T, F: FnOnce(&crate::Ref<T>) -> T>(op: F) -> Re
     }));
 
     // SAFETY: `Box::into_raw` ensures the pointer is non-null.
-    let ptr = unsafe { NonNull::new_unchecked(heap.cast()) };
-    let rc_weak = crate::Ref { ptr };
+    let weak = crate::Ref {
+        ptr: unsafe { NonNull::new_unchecked(heap.cast()) },
+    };
 
     // We get the real instance by executing the closure.
     // SAFETY (1): The weak reference is passed by reference to make sure the
@@ -252,26 +253,23 @@ pub(crate) fn new_cyclic_ref_box<T, F: FnOnce(&crate::Ref<T>) -> T>(op: F) -> Re
     // SAFETY (2): If this panics, `Ref` will deallocate the heap
     // memory, but since the status was set to `Dropped`, it will not run
     // drop on the uninitialized memory.
-    let data = op(&rc_weak);
+    let data = op(&weak);
 
     // We write the data without reading the old one.
-    // SAFETY: we cannot create a reference to the data on the heap as it
-    // is uninitialized, so we use `addr_of_mut`.
-    unsafe {
-        ptr::addr_of_mut!((*ptr.as_ptr()).data).write(UnsafeCell::new(data));
-    }
+    // SAFETY (1): there are no other mutable references to the data field. The RefBox cannot
+    // be borrowed because the status is `Dropped`.
+    // SAFETY (2): the references cover uninitialized data, but it is behind MaybeUninit
+    // so they are allowed here.
+    unsafe { (*heap).data.get_mut().write(data) };
 
-    // Decrease the reference count and forget the weak reference without
-    // deallocating or running the destructor of `T`.
-    {
-        std::mem::forget(rc_weak);
-        let heap = unsafe { ptr.as_ref() };
-        heap.inner.decrease_refcount();
-        heap.inner.status.set(Status::Available);
-    }
+    // SAFETY: by now the bytes in the data field are initialized.
+    unsafe { (*heap).inner.status.set(Status::Available) };
+
+    // The weak pointer is explicitly dropped here to ensure it is not dropped sooner.
+    drop(weak);
 
     RefBox {
-        ptr,
+        ptr: unsafe { NonNull::new_unchecked(heap.cast()) },
         _p: PhantomData,
     }
 }

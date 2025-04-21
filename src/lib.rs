@@ -332,7 +332,9 @@ impl<T: ?Sized> RefBox<T> {
         // SAFETY (1): ptr is safe to dereference, see Self::heap().
         // SAFETY (2): UnsafeCell is `#[repr(transparent)]`, which means
         // a pointer to the cell is also a pointer to its only field.
-        unsafe { std::ptr::addr_of!((*ptr).data) as *const T }
+        // SAFETY (3): RefBox could be borrowed, so use &raw to ensure no reference is created
+        // while there is a mutable reference.
+        unsafe { &raw const (*ptr).data as *const T }
     }
 
     /// Turns the `RefBox` into a raw pointer.
@@ -556,8 +558,8 @@ impl<T: ?Sized> Ref<T> {
         // SAFETY (1): ptr is safe to dereference, see Self::heap().
         // SAFETY (2): UnsafeCell is `#[repr(transparent)]`, which means
         // a pointer to the cell is also a pointer to its only field.
-        // SAFETY (3): data could be uninitialized, so use addr_of.
-        unsafe { std::ptr::addr_of!((*ptr).data) as *const T }
+        // SAFETY (3): data could be uninitialized, so use &raw to ensure no reference is created
+        unsafe { &raw const (*ptr).data as *const T }
     }
 
     /// Turns the `Ref` into a raw pointer.
