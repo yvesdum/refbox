@@ -1,11 +1,11 @@
 [package]
 name = "refbox"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-description = "A smart pointer with a single owner and many weak references"
-keywords = ["smart", "pointer", "weak", "reference", "owner"]
+description = "A Box with weak references"
+keywords = ["smart", "pointer", "weak", "reference", "rc"]
 categories = ["memory-management", "rust-patterns"]
 repository = "https://github.com/yvesdum/refbox"
 
@@ -14,7 +14,7 @@ cyclic = []
 cyclic_stable = []
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = "0.5.1"
 
 [[bench]]
 name = "benches"
