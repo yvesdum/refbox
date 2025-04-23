@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+* Added `cyclic_stable` feature
+* Changed the Rust edition to 2024
+* Changed `Ref` to `Weak` to resemble the types in the standard library
+* Changed `create_ref()` to `downgrade()` to resemble the method in the standard library
+* 
+
 ## 0.3.0
 
 * Added optional feature `cyclic`

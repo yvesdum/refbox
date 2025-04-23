@@ -2,28 +2,45 @@
 
 A `Box` with weak references.
 
-A `RefBox` is a smart pointer that owns the data, just like a standard `Box`. Similarly, a RefBox cannot be cloned cheaply, and when it is dropped, the data it points to is dropped as well. However, a RefBox may have many `Ref` pointers to the same data. These pointers don’t own the data and are reference counted, comparable to the standard library's `Weak`. Which means, as long as the RefBox is alive, Refs can be used to access the data from multiple places without lifetime parameters.
+A `RefBox` is a smart pointer that owns the data, just like a standard
+`Box`. Similarly, a RefBox cannot be cloned cheaply, and when it is
+dropped, the data it points to is dropped as well. However, a RefBox may
+have many `Weak` pointers to the same data. These pointers don't own the
+data and are reference counted, comparable to the standard library's
+`std::rc::Weak`. As long as the RefBox is alive, Weak pointers can be used to
+access the data from multiple places without lifetime parameters.
 
-A RefBox could be seen as a lighter alternative to the standard library’s `Rc`, `Weak` and `RefCell` combination in cases where there is one Rc with many Weaks to the same data.
+A RefBox could be seen as a lighter alternative to the standard library's
+`Rc`, `std::rc::Weak` and `RefCell` combination, in cases where there is one
+Rc with many Weak pointers to the same data.
 
-A RefBox does not differentiate between strong and weak pointers and immutable and mutable borrows. There is always a single strong pointer, zero, one or many weak pointers and all borrows are mutable. This means there can only be one borrow active at any given time. But in return, RefBox uses less memory, is faster to borrow from, and a Ref does not need to be upgraded to a RefBox in order to access the data.
+Note: this crate is tested with unit tests, which were run with miri to check for 
+undefined behavior and memory leaks. Still, the crate is considered to be in 
+experimental state and the public api and implementation may change in the future.
 
-Note: this crate is currently **experimental**.
+## Tradeoffs
 
-## Rc<RefCell<T>> vs RefBox<T>
+A RefBox does not differentiate between strong and weak pointers and
+immutable and mutable borrows. There is always a *single* strong pointer,
+zero, one or many weak pointers, and all borrows are mutable. This means
+there can only be one borrow active at any given time. In return,
+RefBox uses less memory, is faster to borrow from, and a Weak does not need
+to be upgraded to access the data.
 
-|                  | `Rc<RefCell<T>>`                                               | `RefBox<T>`                                     |
-|------------------|----------------------------------------------------------------|-------------------------------------------------|
-| Pointer kinds    | Many strong pointers and many weak pointers                    | One strong owner and many weak pointers         |
-| Clonable         | Both `Rc` and `Weak` are cheap to clone                        | Only `Ref` can be cheaply cloned                |
-| Up-/Downgrading  | `Rc` is downgradable, `Weak` is upgradable                     | No up- or downgrading, but `RefBox::create_ref` |
-| Data access      | `RefCell::try_borrow_mut`                                      | `RefBox::try_borrow_mut`                        |
-| Weak data access | 1. `Weak::upgrade`<br>2. `RefCell::try_borrow_mut`<br>3. `Rc::drop` | `Ref::try_borrow_mut`                      |
-| Active borrows   | One mutable or many immutable                                  | One (mutable or immutable)                      |
-| `T::drop`        | When all `Rc`s are dropped                                     | When owner `RefBox` is dropped                  |
-| Max no. `Weak`s  | `usize::MAX`                                                   | `u32::MAX`                                      |
-| Heap overhead    | 64-bit: 24 bytes<br>32-bit: 12 bytes                           | 8 bytes                                         |
-| Performance      | Cloning is fast, mutating is slow             | Cloning references is a tiny bit slower, mutating is much faster |
+## Rc + Refcell vs. RefBox
+
+|                                    | `Rc<RefCell<T>>`                                                             | `RefBox<T>`                                                                                                 |
+|------------------------------------|------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| Pointer kinds                      | Many `Rc` pointers and many `Weak` pointers                                  | One `RefBox` pointer and many `Weak` pointers                                                               |
+| Clonable                           | Both `Rc` and `Weak` are cheap to clone                                      | Only `Weak` is cheap to clone                                                                               |
+| Up-/Downgrading                    | `Rc` is downgradable, `Weak` is upgradable                                   | `RefBox` is downgradable                                                                                    |
+| Data access through strong pointer | `RefCell::try_borrow_mut`                                                    | `RefBox::try_borrow_mut`                                                                                    |
+| Data access through weak pointer   | 1. `Weak::upgrade`<br>2. `RefCell::try_borrow_mut`<br>3. Drop temporary `Rc` | `Weak::try_borrow_mut`                                                                                      |
+| Simultaneous borrows               | One mutable OR multiple immutable                                            | One (mutable or immutable)                                                                                  |
+| `T::drop` happens when             | When all `Rc`s are dropped                                                   | When the single `RefBox` is dropped                                                                         |
+| Max number of `Weak` pointers      | `usize::MAX`                                                                 | `u32::MAX`                                                                                                  |
+| Heap overhead                      | 64-bit: 24 bytes<br>32-bit: 12 bytes                                         | 8 bytes<br>With cyclic_stable enabled on 64-bit: 24 bytes<br>With cyclic_stable enabled on 32-bit: 12 bytes |
+| Performance                        | Cloning is fast, mutating is slow                                            | Cloning is a tiny bit slower, mutating is much faster                                                       |
 
 ## Examples
 
@@ -32,16 +49,27 @@ use refbox::RefBox;
 
 fn main() {
     // Create a RefBox.
-    let owner = RefBox::new(100);
+    let ref_box = RefBox::new(100);
 
     // Create a weak reference.
-    let weak = owner.create_ref();
+    let weak = RefBox::downgrade(&ref_box);
 
     // Access the data.
     let borrow = weak.try_borrow_mut().unwrap();
     assert_eq!(*borrow, 100);
 }
 ```
+
+## Optional Features
+
+* **cyclic_stable**: Enables the `RefBox::new_cyclic()` method on the stable release channel
+  of Rust. This allows you to create data structures that contain weak references to (parts of)
+  themselves in one go. To make it work, the memory layout of the type `T` is saved in the heap
+  part of the `RefBox`. This increases the memory size of the heap part with `2 * usize`.
+* **cyclic**: Enables the `RefBox::new_cyclic()` method on the nightly release channel without
+  increasing the memory size of the heap part. This allows you to create data structures that
+  contain weak references to (parts of) themselves in one go. Requires the nightly feature
+  `layout_for_ptr`.
 
 ## Performance comparison
 
