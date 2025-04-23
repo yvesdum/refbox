@@ -15,7 +15,7 @@ use std::alloc::Layout;
 
 /// The reference counter.
 // Note: when changing this also change the public documentation.
-pub(crate) type RefCount = u32;
+pub(crate) type WeakCount = u32;
 
 /// The current status of a `RefBox`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,7 +32,7 @@ pub(crate) struct RefBoxHeapInner {
     /// The current status of the data.
     status: Cell<Status>,
     /// The number of weak references to the data.
-    refcount: Cell<RefCount>,
+    weak_count: Cell<WeakCount>,
     /// The layout of the `RefBoxHeap<T>`.
     ///
     /// Necessary to deallocate the memory of the heap part when feature `cyclic_stable` is enabled.
@@ -58,8 +58,8 @@ impl RefBoxHeapInner {
 
     /// Returns the current weak reference count.
     #[inline]
-    pub(crate) fn refcount(&self) -> RefCount {
-        self.refcount.get()
+    pub(crate) fn weak_count(&self) -> WeakCount {
+        self.weak_count.get()
     }
 
     /// The layout of the entire `RefBoxHeap<T>`.
@@ -74,8 +74,8 @@ impl RefBoxHeapInner {
     /// Sets the weak reference count. Used in tests.
     #[inline]
     #[cfg(test)]
-    pub(crate) fn set_refcount(&self, count: RefCount) {
-        self.refcount.set(count);
+    pub(crate) fn set_weak_count(&self, count: WeakCount) {
+        self.weak_count.set(count);
     }
 
     /// Increases the reference counter by 1.
@@ -84,13 +84,13 @@ impl RefBoxHeapInner {
     ///
     /// Panics if the number of `Weak`s overflows `RefCount::MAX`.
     #[inline]
-    pub(crate) fn increase_refcount(&self) {
-        let refcount = self.refcount();
+    pub(crate) fn increase_weak_count(&self) {
+        let refcount = self.weak_count();
 
-        if refcount == RefCount::MAX {
+        if refcount == WeakCount::MAX {
             cold_panic();
         } else {
-            self.refcount.set(refcount + 1);
+            self.weak_count.set(refcount + 1);
         }
     }
 
@@ -98,22 +98,22 @@ impl RefBoxHeapInner {
     ///
     /// Returns false if the refcount overflowed.
     #[inline]
-    pub(crate) fn try_increase_refcount(&self) -> bool {
-        let refcount = self.refcount();
+    pub(crate) fn try_increase_weak_count(&self) -> bool {
+        let refcount = self.weak_count();
 
-        if refcount == RefCount::MAX {
+        if refcount == WeakCount::MAX {
             cold_false()
         } else {
-            self.refcount.set(refcount + 1);
+            self.weak_count.set(refcount + 1);
             true
         }
     }
 
     /// Decreases the reference counter by 1.
     #[inline]
-    fn decrease_refcount(&self) -> RefCount {
-        let refcount = self.refcount() - 1;
-        self.refcount.set(refcount);
+    fn decrease_refcount(&self) -> WeakCount {
+        let refcount = self.weak_count() - 1;
+        self.weak_count.set(refcount);
         refcount
     }
 
@@ -208,7 +208,7 @@ pub(crate) fn new_ref_box<T>(value: T) -> RefBox<T> {
     let heap = Box::into_raw(Box::new(RefBoxHeap {
         inner: RefBoxHeapInner {
             status: Cell::new(Status::Available),
-            refcount: Cell::new(0),
+            weak_count: Cell::new(0),
             #[cfg(feature = "cyclic_stable")]
             layout: Layout::new::<RefBoxHeap<T>>(),
         },
@@ -228,14 +228,14 @@ pub(crate) fn new_ref_box<T>(value: T) -> RefBox<T> {
 /// `RefBoxRef` to the same data.
 #[cfg(any(feature = "cyclic", feature = "cyclic_stable"))]
 #[inline]
-pub(crate) fn new_cyclic_ref_box<T, F: FnOnce(&crate::Ref<T>) -> T>(op: F) -> RefBox<T> {
+pub(crate) fn new_cyclic_ref_box<T, F: FnOnce(&crate::Weak<T>) -> T>(op: F) -> RefBox<T> {
     // Allocate the heap data with uninitialized T data.
     // SAFETY: `status` is set to `Dropped` to avoid being able to access
     // the uninitialized data in the closure.
     let heap = Box::into_raw(Box::new(RefBoxHeap {
         inner: RefBoxHeapInner {
             status: Cell::new(Status::Dropped),
-            refcount: Cell::new(1),
+            weak_count: Cell::new(1),
             #[cfg(feature = "cyclic_stable")]
             layout: Layout::new::<RefBoxHeap<T>>(),
         },
@@ -243,14 +243,14 @@ pub(crate) fn new_cyclic_ref_box<T, F: FnOnce(&crate::Ref<T>) -> T>(op: F) -> Re
     }));
 
     // SAFETY: `Box::into_raw` ensures the pointer is non-null.
-    let weak = crate::Ref {
+    let weak = crate::Weak {
         ptr: unsafe { NonNull::new_unchecked(heap.cast()) },
     };
 
     // We get the real instance by executing the closure.
     // SAFETY (1): The weak reference is passed by reference to make sure the
     // memory is not deallocated at the end of the closure.
-    // SAFETY (2): If this panics, `Ref` will deallocate the heap
+    // SAFETY (2): If this panics, `Weak` will deallocate the heap
     // memory, but since the status was set to `Dropped`, it will not run
     // drop on the uninitialized memory.
     let data = op(&weak);
@@ -316,7 +316,7 @@ pub(crate) unsafe fn drop_ref_box<T: ?Sized>(heap: NonNull<RefBoxHeap<T>>) {
 
             // If there are no weak references, the heap
             // part should be deallocated as well.
-            if unsafe { heap.as_ref() }.inner.refcount() == 0 {
+            if unsafe { heap.as_ref() }.inner.weak_count() == 0 {
                 // SAFETY: there are no more references to the data.
                 unsafe { dealloc_heap(heap) };
             }
@@ -338,10 +338,10 @@ pub(crate) unsafe fn drop_ref_box<T: ?Sized>(heap: NonNull<RefBoxHeap<T>>) {
     }
 }
 
-/// Called when a weak Ref is dropped.
+/// Called when a weak pointer is dropped.
 #[inline]
-pub(crate) unsafe fn drop_ref<T: ?Sized>(heap: NonNull<RefBoxHeap<T>>) {
-    // SAFETY: the data of a Ref may be uninitialized, so we have to
+pub(crate) unsafe fn drop_weak<T: ?Sized>(heap: NonNull<RefBoxHeap<T>>) {
+    // SAFETY: the data of a Weak pointer may be uninitialized, so we have to
     // make sure not to create a reference that covers the `data` field
     // of RefBoxHeap.
 

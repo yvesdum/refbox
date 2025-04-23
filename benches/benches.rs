@@ -58,10 +58,10 @@ pub fn mutate_through_weak(c: &mut Criterion) {
             })
         });
 
-        group.bench_with_input(BenchmarkId::new("RefBox + Ref", i), &i, |b, _| {
+        group.bench_with_input(BenchmarkId::new("RefBox + Weak", i), &i, |b, _| {
             b.iter(|| {
                 let rc = RefBox::new(0);
-                let weak = rc.create_ref();
+                let weak = RefBox::downgrade(&rc);
                 for _ in 0..i {
                     let mut borrow = weak.try_borrow_mut().unwrap();
                     *borrow = 100;
@@ -91,11 +91,11 @@ pub fn create_weak(c: &mut Criterion) {
             })
         });
 
-        group.bench_with_input(BenchmarkId::new("RefBox + Ref", i), &i, |b, _| {
+        group.bench_with_input(BenchmarkId::new("RefBox + Weak", i), &i, |b, _| {
             b.iter(|| {
                 let rc = RefBox::new(0);
                 for _ in 0..i {
-                    let weak = rc.create_ref();
+                    let weak = RefBox::downgrade(&rc);
                     drop(black_box(weak));
                 }
                 rc
@@ -123,10 +123,10 @@ pub fn clone_weak(c: &mut Criterion) {
             })
         });
 
-        group.bench_with_input(BenchmarkId::new("RefBox + Ref", i), &i, |b, _| {
+        group.bench_with_input(BenchmarkId::new("RefBox + Weak", i), &i, |b, _| {
             b.iter(|| {
                 let rc = RefBox::new(0);
-                let weak = rc.create_ref();
+                let weak = RefBox::downgrade(&rc);
                 for _ in 0..i {
                     let clone = weak.clone();
                     drop(black_box(clone));
