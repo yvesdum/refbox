@@ -1,12 +1,16 @@
 # Changelog
 
+## 0.4.1
+
+* Fixed documentation claim about drop times ([PR #3](https://github.com/yvesdum/refbox/pull/3))
+* Upgraded criterion dev-dependency
+
 ## 0.4.0
 
 * Added `cyclic_stable` feature
 * Changed the Rust edition to 2024
 * Changed `Ref` to `Weak` to resemble the types in the standard library
 * Changed `create_ref()` to `downgrade()` to resemble the method in the standard library
-* 
 
 ## 0.3.0
 
