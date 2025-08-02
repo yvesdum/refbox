@@ -1,6 +1,6 @@
 [package]
 name = "refbox"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
@@ -14,7 +14,7 @@ cyclic = []
 cyclic_stable = []
 
 [dev-dependencies]
-criterion = "0.5.1"
+criterion = "0.7.0"
 
 [[bench]]
 name = "benches"
