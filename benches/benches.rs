@@ -1,7 +1,8 @@
 use std::cell::RefCell;
+use std::hint::black_box;
 use std::rc::Rc;
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use refbox::RefBox;
 
 const BORROWS: [usize; 5] = [1, 100, 1000, 5000, 10000];
