@@ -166,7 +166,7 @@ impl<T: ?Sized> RefBoxHeap<T> {
         unsafe { &mut *self.data.get() }
     }
 
-    /// Runs the destructor of the data.
+    /// Runs the destructor of the data in place.
     ///
     /// # Safety
     ///
@@ -181,7 +181,7 @@ impl<T: ?Sized> RefBoxHeap<T> {
 }
 
 impl<T> RefBoxHeap<T> {
-    /// Takes the data out of the heap without running the destructor.
+    /// Moves the data out without running the destructor.
     ///
     /// # Safety
     ///
