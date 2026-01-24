@@ -180,6 +180,22 @@ impl<T: ?Sized> RefBoxHeap<T> {
     }
 }
 
+impl<T> RefBoxHeap<T> {
+    /// Takes the data out of the heap without running the destructor.
+    ///
+    /// # Safety
+    ///
+    /// 1. Ensure there are no references to `T`.
+    /// 2. Ensure `T` is initialized.
+    /// 3. Ensure `T` is not already dropped.
+    pub(crate) unsafe fn take_data(&self) -> T {
+        // SAFETY: the caller must uphold the safety requirements
+        let value = unsafe { ptr::read(self.data.get()) };
+        self.inner.status.set(Status::Dropped);
+        value
+    }
+}
+
 /// Panics.
 ///
 /// Is unlikely to be called, so it has a 'cold' attribute for optimization.
@@ -354,6 +370,40 @@ pub(crate) unsafe fn drop_weak<T: ?Sized>(heap: NonNull<RefBoxHeap<T>>) {
         if unsafe { &(*heap.as_ptr()).inner }.status() == Status::Dropped {
             // SAFETY: there are no more references to the heap part.
             unsafe { dealloc_heap(heap) };
+        }
+    }
+}
+
+/// Called when [`RefBox::take`] is used to move the value out.
+#[inline]
+pub(crate) unsafe fn take_ref_box<T>(heap: NonNull<RefBoxHeap<T>>) -> T {
+    // SAFETY: the data of the owner is always initialized,
+    // so we can create references to the RefBoxHeap.
+
+    match unsafe { heap.as_ref() }.inner.status() {
+        Status::Available => {
+            // If there is no active borrow, we can take the data.
+            // SAFETY: the status is `Available`, so the `RefBoxHeap` is initialized, there are no
+            // other references to it, and it is not yet dropped.
+            let value = unsafe { heap.as_ref().take_data() };
+
+            // If there are no weak references, the heap
+            // part should be deallocated as well.
+            if unsafe { heap.as_ref() }.inner.weak_count() == 0 {
+                // SAFETY: there are no more references to the data.
+                unsafe { dealloc_heap(heap) };
+            }
+
+            value
+        }
+        Status::Borrowed => {
+            // Cannot take while borrowed - this is a programming error.
+            panic!("cannot take value while it is borrowed");
+        }
+        Status::DroppedWhileBorrowed | Status::Dropped => {
+            // SAFETY: if the status is `DroppedWhileBorrowed` or `Dropped` it means
+            // the RefBox was already dropped/taken which is already UB.
+            unsafe { std::hint::unreachable_unchecked() };
         }
     }
 }

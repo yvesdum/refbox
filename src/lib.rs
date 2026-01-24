@@ -226,6 +226,88 @@ impl<T> RefBox<T> {
         internals::new_ref_box(value)
     }
 
+    /// Takes the value out of the `RefBox`, consuming it.
+    ///
+    /// This is like [`Drop`], but instead of dropping the value, it returns it.
+    /// After calling `take()`, any [`Weak`] references will see the data as dropped
+    /// (i.e., `is_alive()` will return `false` and `try_borrow_mut()` will return
+    /// `Err(BorrowError::Dropped)`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the data is currently borrowed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use refbox::RefBox;
+    ///
+    /// let ref_box = RefBox::new(String::from("hello"));
+    /// let weak = RefBox::downgrade(&ref_box);
+    ///
+    /// // Take the value out instead of dropping it
+    /// let value = ref_box.take();
+    /// assert_eq!(value, "hello");
+    ///
+    /// // Weak references see the data as dropped
+    /// assert!(!weak.is_alive());
+    /// ```
+    pub fn take(self) -> T {
+        let ptr = self.ptr;
+        std::mem::forget(self); // Don't run normal Drop
+        // SAFETY: self is forgotten, so the data won't be double-dropped
+        unsafe { internals::take_ref_box(ptr) }
+    }
+
+    /// Tries to take the value out of the `RefBox`, consuming it.
+    ///
+    /// This is like [`take`](Self::take), but returns an error instead of panicking
+    /// if the data is currently borrowed.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(T)` if the value was successfully taken
+    /// * `Err(self)` if the data is currently borrowed (the `RefBox` is returned unchanged)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use refbox::RefBox;
+    ///
+    /// let ref_box = RefBox::new(42);
+    ///
+    /// // Take the value
+    /// let value = ref_box.try_take().unwrap();
+    /// assert_eq!(value, 42);
+    /// ```
+    ///
+    /// If the data is borrowed through a [`Weak`] reference, `try_take` returns
+    /// the `RefBox` unchanged:
+    ///
+    /// ```
+    /// use refbox::RefBox;
+    ///
+    /// let ref_box = RefBox::new(42);
+    /// let weak = RefBox::downgrade(&ref_box);
+    /// let borrow = weak.try_borrow_mut().unwrap();
+    ///
+    /// // Can't take while borrowed through weak - get the RefBox back
+    /// let ref_box = ref_box.try_take().unwrap_err();
+    ///
+    /// drop(borrow);
+    ///
+    /// // Now we can take
+    /// let value = ref_box.try_take().unwrap();
+    /// assert_eq!(value, 42);
+    /// ```
+    pub fn try_take(self) -> Result<T, Self> {
+        match self.heap().status() {
+            Status::Available => Ok(self.take()),
+            Status::Borrowed => Err(self),
+            Status::Dropped | Status::DroppedWhileBorrowed => unreachable!(),
+        }
+    }
+
     /// Creates a new `RefBox` pointer through a closure which receives a
     /// [`Weak`] pointer to the same data. Use this to create data structures
     /// that contain weak references to themselves.
@@ -1190,5 +1272,86 @@ mod tests {
     fn heap_overhead_cyclic_stable_64bit() {
         let layout = std::alloc::Layout::new::<RefBoxHeap<()>>();
         assert_eq!(layout.size(), 24);
+    }
+
+    /// Taking the value should return the value and mark as dropped for weak refs.
+    #[test]
+    fn take_returns_value() {
+        let ref_box = RefBox::new(String::from("hello"));
+        let weak = RefBox::downgrade(&ref_box);
+        assert!(weak.is_alive());
+
+        let value = ref_box.take();
+        assert_eq!(value, "hello");
+        assert!(!weak.is_alive());
+        assert!(weak.try_borrow_mut().is_err());
+    }
+
+    /// Taking the value without weak refs should deallocate immediately.
+    #[test]
+    fn take_without_weak_deallocates() {
+        let ref_box = RefBox::new(123456);
+        let value = ref_box.take();
+        assert_eq!(value, 123456);
+    }
+
+    /// Taking should run correctly with types that have Drop impls.
+    #[test]
+    fn take_does_not_run_drop() {
+        struct DropChecker(Rc<Cell<bool>>);
+        impl Drop for DropChecker {
+            fn drop(&mut self) {
+                self.0.set(true);
+            }
+        }
+
+        let drop_checker = Rc::new(Cell::new(false));
+        let ref_box = RefBox::new(DropChecker(drop_checker.clone()));
+
+        // Take should not run drop on the value
+        let taken = ref_box.take();
+        assert!(!drop_checker.get());
+
+        // Dropping the taken value should run drop
+        drop(taken);
+        assert!(drop_checker.get());
+    }
+
+    /// try_take should return Ok when not borrowed.
+    #[test]
+    fn try_take_succeeds_when_not_borrowed() {
+        let ref_box = RefBox::new(42);
+        let result = ref_box.try_take();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 42);
+    }
+
+    /// try_take should return Err (with RefBox) when borrowed through weak.
+    #[test]
+    fn try_take_fails_when_borrowed() {
+        let ref_box = RefBox::new(42);
+        let weak = RefBox::downgrade(&ref_box);
+        let _borrow = weak.try_borrow_mut().unwrap();
+
+        let result = ref_box.try_take();
+        assert!(result.is_err());
+
+        // We got the RefBox back
+        let ref_box = result.unwrap_err();
+        drop(_borrow);
+
+        // Now we can take
+        let value = ref_box.take();
+        assert_eq!(value, 42);
+    }
+
+    /// Taking should transition status correctly.
+    #[test]
+    fn take_changes_status() {
+        let ref_box = RefBox::new(123456);
+        let weak = RefBox::downgrade(&ref_box);
+        assert_eq!(weak.status(), Status::Available);
+        ref_box.take();
+        assert_eq!(weak.status(), Status::Dropped);
     }
 }
